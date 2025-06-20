@@ -1,7 +1,6 @@
 let allMovies = [];
 let filteredMovies = [];
 
-// Get the base URL dynamically - updated for Render
 const API_BASE_URL = (() => {
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
         return 'http://localhost:3006';
@@ -194,7 +193,6 @@ function openModal(movie) {
     const modalTomatoes = document.getElementById('modal-Tomatoes');
     const modalComments = document.getElementById('modal-Comments');
 
-    // Set movie data
     modalTitle.textContent = movie.title || 'N/A';
     modalPlot.textContent = movie.fullplot || movie.plot || 'N/A';
     modalGenres.textContent = movie.genres?.join(', ') || 'N/A';
@@ -243,7 +241,6 @@ function openModal(movie) {
             commentsList.appendChild(commentEl);
         });
 
-        // Edit functionality
         document.querySelectorAll('.edit-comment').forEach(button => {
             button.addEventListener('click', async () => {
                 const commentId = button.dataset.id;
@@ -337,13 +334,11 @@ function openModal(movie) {
         }
     });
 
-    // Show the modal
     modal.style.display = 'block';
     document.body.style.overflow = 'hidden';
 }
 
 function GetLivros() {
-    // Show loading state
     const container = document.getElementById('movies-container');
     const statsElement = document.getElementById('movies-stats');
 
@@ -394,7 +389,6 @@ function GetComments(id) {
         });
 }
 
-// AI Query functionality
 document.addEventListener('DOMContentLoaded', function() {
     const askAiButton = document.getElementById('ask-ai');
     if (askAiButton) {
