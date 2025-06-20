@@ -3,7 +3,6 @@ import cors from 'cors';
 import { connectToDB, closeConnection } from './mongo_iterate.js';
 import { ObjectId } from "mongodb";
 const app = express();
-// Use environment PORT or fallback to 3006
 const PORT = process.env.PORT || 3006;
 import { CallGemini } from './OpenAiApi.js';
 
