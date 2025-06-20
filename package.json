@@ -1,0 +1,19 @@
+{
+  "name": "mongotest",
+  "version": "1.0.0",
+  "description": "",
+  "main": "mongotest.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "type": "module",
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "dotenv": "^16.5.0",
+    "mongodb": "^6.10.0",
+    "mongoose": "^8.8.1",
+    "openai": "^5.1.1"
+  }
+}

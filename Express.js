@@ -1,0 +1,330 @@
+import express from 'express';
+import cors from 'cors';
+import { connectToDB, closeConnection } from './mongo_iterate.js';
+import {ObjectId} from "mongodb";
+const app = express();
+const PORT = 3006;
+import { CallGemini } from './OpenAiApi.js';
+
+// Middleware
+app.use(cors());
+app.use(express.static('public'));
+app.use(express.json());
+
+// Extra Functions
+
+
+
+function buildMovieContext(movies) {
+    const movieSummary = movies.map(movie => ({
+        Title: movie.title,
+        Cast: movie.cast?.join(', '),
+        Genres: movie.genres?.join(', '),
+        Plot: movie.fullplot,
+        Runtime: movie.runtime,
+        Languages: movie.languages?.join(', '),
+        Release: movie.released,
+        Directors: movie.directors?.join(', '),
+        Writers: movie.writers?.join(', '),
+        Year: movie.year,
+        IMDb: movie.imdb?.rating,
+        Tomatoes: movie.tomatoes?.viewer?.rating,
+        Country: movie.countries?.join(', '),
+        Awards: movie.awards?.text
+    }));
+    return JSON.stringify(movieSummary, null, 2); // Pretty-print JSON
+}
+
+
+
+
+
+function analyzeQuery(query) {
+    const lowerQuery = query.toLowerCase();
+
+    const keywords = {
+        genres: ['action', 'adventure', 'animation', 'comedy', 'crime', 'documentary',
+            'drama', 'family', 'fantasy', 'horror', 'music', 'mystery', 'romance',
+            'sci-fi', 'science fiction', 'thriller', 'war', 'western'],
+        years: query.match(/\b(19|20)\d{2}\b/g),
+        ratings: ['good', 'bad', 'best', 'worst', 'highly rated', 'low rated', 'top rated'],
+        moods: ['funny', 'sad', 'scary', 'exciting', 'romantic', 'dark', 'light', 'serious'],
+        similarity: ['similar', 'like', 'recommend', 'suggestion'],
+        quality: ['hidden gem', 'underrated', 'overrated', 'cult', 'classic']
+    };
+
+    return {
+        detectedGenres: keywords.genres.filter(g => lowerQuery.includes(g)),
+        detectedYears: keywords.years || [],
+        detectedMoods: keywords.moods.filter(m => lowerQuery.includes(m)),
+        queryType: determineQueryType(lowerQuery),
+        needsFiltering: shouldFilterMovies(lowerQuery)
+    };
+}
+
+function determineQueryType(query) {
+    if (query.includes('similar') || query.includes('like') || query.includes('recommend')) {
+        return 'recommendation';
+    }
+    if (query.includes('best') || query.includes('top') || query.includes('worst')) {
+        return 'ranking';
+    }
+    if (query.includes('genre') || query.includes('type')) {
+        return 'genre';
+    }
+    if (query.includes('year') || /\b(19|20)\d{2}\b/.test(query)) {
+        return 'year';
+    }
+    if (query.includes('hidden') || query.includes('underrated')) {
+        return 'discovery';
+    }
+    return 'general';
+}
+
+function shouldFilterMovies(query) {
+    return query.includes('genre') ||
+        query.includes('year') ||
+        /\b(19|20)\d{2}\b/.test(query) ||
+        query.includes('rating') ||
+        query.includes('best') ||
+        query.includes('worst');
+}
+
+function filterMoviesByQuery(movies, queryAnalysis) {
+    let filteredMovies = [...movies];
+
+    if (queryAnalysis.detectedGenres.length > 0) {
+        filteredMovies = filteredMovies.filter(movie =>
+                movie.genres && movie.genres.some(genre =>
+                    queryAnalysis.detectedGenres.some(detected =>
+                        genre.toLowerCase().includes(detected)
+                    )
+                )
+        );
+    }
+
+    if (queryAnalysis.detectedYears.length > 0) {
+        const years = queryAnalysis.detectedYears.map(y => parseInt(y));
+        filteredMovies = filteredMovies.filter(movie =>
+            movie.year && years.includes(movie.year)
+        );
+    }
+
+    if (queryAnalysis.queryType === 'ranking') {
+        filteredMovies = filteredMovies.filter(movie =>
+            movie.imdb && movie.imdb.rating
+        ).sort((a, b) => (b.imdb.rating || 0) - (a.imdb.rating || 0));
+    }
+
+    return filteredMovies;
+}
+
+
+// Endpoints
+
+
+app.get('/movies', async (req, res) => {
+    try {
+        const db = await connectToDB();
+        const movies = await db.collection('movies').find().limit(200).toArray();
+        res.json(movies);
+    } catch (error) {
+        console.error('Error fetching movies:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+app.post('/movies/search/:query', async (req, res) => {
+    try {
+        const db = await connectToDB();
+        const query = req.params.query;
+
+        const movies = await db.collection('movies').find({
+            title: { $regex: query, $options: 'i' }
+        }).toArray();
+
+        console.log(movies);
+
+        res.json(movies);
+    } catch (error) {
+        console.error('Error fetching movies:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+app.post('/movies/query', async (req, res) => {
+    try {
+        const { query, userType = 'casual' } = req.body;
+
+        const queryAnalysis = analyzeQuery(query);
+        const db = await connectToDB();
+        let movies = await db.collection('movies').find().limit(200).toArray();
+
+        if (queryAnalysis.needsFiltering) {
+            movies = filterMoviesByQuery(movies, queryAnalysis);
+            console.log(`Filtered from 200 to ${movies.length} movies`);
+        }
+
+        const movieContext = buildMovieContext(movies);
+
+        const Users = {
+            casual: "You are a friendly movie recommender. Focus on entertaining, popular films. Be conversational and explain why movies are fun to watch, do not mentioned the Databate, youre just a person doing a reommendation.",
+            critic: "You are a sophisticated film analyst. Consider cinematography, direction, cultural impact, and artistic merit,do not mentioned the Databate, youre just a person doing a reommendation.",
+            genre: "You are a genre expert. Focus on specific genres, tropes, and deep cuts within categories,do not mentioned the Databate, youre just a person doing a reommendation."
+        };
+
+        const systemMessage = `${Users[userType]}
+
+        Query Analysis: ${JSON.stringify(queryAnalysis)}
+        
+        Here is the movie database (filtered based on the query):
+        ${movieContext}
+        
+        
+        Answer the user's question based on these movies. Always recommend from this list and explain your reasoning. 
+        If the query asks for specific genres, years, or ratings, focus on those criteria.
+        
+        Give me the answer in this format:{ "Explanation": where youre noraml response,
+          "Titles" :where you will give me the title of the movie chosen}
+          
+          dont make it a json just make it in that format`
+
+        ;
+
+        const respostaRaw = await CallGemini(query, systemMessage);
+       console.log(respostaRaw)
+        let resposta;
+        try {
+            resposta = typeof respostaRaw === 'string' ? JSON.parse(respostaRaw) : respostaRaw;
+        } catch (e) {
+            console.error('Failed to parse AI response:', e);
+            return res.status(500).json({ error: 'Failed to parse AI response' });
+        }
+
+        res.json({
+            response: resposta.Explanation,
+            Titles: resposta.Titles,
+            userType: userType,
+            query: query,
+            analysis: queryAnalysis,
+            moviesConsidered: movies.length
+        });
+
+        console.log(resposta);
+
+    } catch (error) {
+        console.error('Error fetching Response:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.get('/Comments', async (req, res) => {
+    try {
+        const db = await connectToDB();
+        const Comments = await db.collection('comments').find().toArray();
+        res.json(Comments);
+    } catch (error) {
+        console.error('Error fetching movies:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+app.get('/Comments/:id', async (req, res) => {
+    try {
+        const db = await connectToDB();
+        const movieid = new ObjectId(req.params.id);
+        const Comments = await db.collection('comments').find({ movie_id: movieid })
+            .toArray();
+        res.json(Comments);
+    } catch (error) {
+        console.error('Error fetching movies:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+
+
+app.post('/Comments/add', async (req, res) => {
+    try {
+        const db = await connectToDB();
+
+        const { name, email, movie_id, text } = req.body;
+
+        if (!name || !email || !movie_id || !text) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        const newComment = {
+            name,
+            email,
+            movie_id: new ObjectId(movie_id),
+            text,
+            date: new Date()
+        };
+
+        const result = await db.collection('comments').insertOne(newComment);
+
+        res.status(201).json({
+            message: 'Comment added successfully',
+            commentId: result.insertedId
+        });
+    } catch (error) {
+        console.error('Error adding comment:', error);
+        res.status(500).json({ error: 'Failed to add comment' });
+    }
+});
+
+app.put('/Comments/update/:id', async (req, res) => {
+    try {
+        const db = await connectToDB();
+        const {text} = req.body;
+        const id = new ObjectId(req.params.id);
+        if (!id || !text) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        const result = await db.collection('comments').updateOne(
+            { _id: new ObjectId(id) },
+            { $set: {  text, date: new Date() } }
+        );
+        res.status(201).json({
+            message: 'Comment updated successfully',
+            commentId: result.insertedId
+        });
+    } catch (error) {
+        console.error('Error adding comment:', error);
+        res.status(500).json({ error: 'Failed to add comment' });
+    }
+});
+
+
+app.delete('/Comments/delete/:id', async (req, res) => {
+    try {
+        const db = await connectToDB();
+        const commentid = new ObjectId(req.params.id);
+        const Comments = await db.collection('comments').deleteOne({ _id: commentid })
+        res.json(Comments);
+    } catch (error) {
+        console.error('Error deleting comment:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+
+app.listen(PORT, async () => {
+    try {
+        await connectToDB();
+
+        console.log(`Server running at http://localhost:${PORT}`);
+    } catch (err) {
+        console.error('Failed to connect to MongoDB on startup', err);
+        process.exit(1);
+    }
+});
+
+
+
+process.on('SIGINT', async () => {
+    console.log('\nShutting down...');
+    await closeConnection();
+    process.exit(0);
+});
