@@ -12,17 +12,14 @@ app.use(cors());
 app.use(express.static('public'));
 app.use(express.json());
 
-// Health check endpoint for Render
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'OK', message: 'Server is running' });
 });
 
-// Root endpoint
 app.get('/', (req, res) => {
     res.json({ message: 'Movie API is running' });
 });
 
-// Extra Functions
 function buildMovieContext(movies) {
     const movieSummary = movies.map(movie => ({
         Title: movie.title,
@@ -123,7 +120,6 @@ function filterMoviesByQuery(movies, queryAnalysis) {
     return filteredMovies;
 }
 
-// Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -331,7 +327,6 @@ app.delete('/Comments/delete/:id', async (req, res) => {
     }
 });
 
-// Start server
 app.listen(PORT, async () => {
     try {
         await connectToDB();
@@ -343,7 +338,6 @@ app.listen(PORT, async () => {
     }
 });
 
-// Graceful shutdown
 process.on('SIGINT', async () => {
     console.log('\nShutting down gracefully...');
     await closeConnection();
