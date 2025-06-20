@@ -19,7 +19,6 @@ async function connectToDB() {
       maxPoolSize: 10,
       minPoolSize: 1,
       maxIdleTimeMS: 30000
-      // ❌ Removed: bufferMaxEntries, useNewUrlParser, useUnifiedTopology
     });
 
     await client.connect();
