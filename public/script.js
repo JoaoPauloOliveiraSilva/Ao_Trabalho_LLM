@@ -1,9 +1,13 @@
 let allMovies = [];
 let filteredMovies = [];
 
-// Get the base URL dynamically
-const API_BASE_URL = window.location.origin.includes('localhost') ? 'http://localhost:3006' : window.location.origin;
-
+// Get the base URL dynamically - updated for Render
+const API_BASE_URL = (() => {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return 'http://localhost:3006';
+    }
+    return window.location.origin;
+})();
 function createModalsFields(movies, { clear = false } = {}) {
     const container = document.getElementById('movies-container');
 
